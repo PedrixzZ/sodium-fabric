@@ -4,6 +4,7 @@ import net.minecraft.client.render.chunk.ChunkOcclusionData;
 import org.jetbrains.annotations.NotNull;
 
 public class VisibilityEncoding {
+    public static final long NULL = 0L;
     private static final int COUNT = GraphDirection.COUNT;
     private static final long ALL_MASK = 0b00000001_00000001_00000001_00000001_00000001_00000001L;
     private static final long[] MASKS = createMasks();
