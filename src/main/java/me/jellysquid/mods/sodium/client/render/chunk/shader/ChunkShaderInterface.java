@@ -22,7 +22,6 @@ public class ChunkShaderInterface {
     private ChunkShaderFogComponent fogComponent;
 
     public ChunkShaderInterface(ShaderBindingContext context, ChunkShaderOptions options) {
-        int shaderProgramId = /* Adicione aqui o ID do programa de shader */;
         
         this.uniformModelViewMatrix = new GlUniformMatrix4f(shaderProgramId, "u_ModelViewMatrix");
         this.uniformProjectionMatrix = new GlUniformMatrix4f(shaderProgramId, "u_ProjectionMatrix");
