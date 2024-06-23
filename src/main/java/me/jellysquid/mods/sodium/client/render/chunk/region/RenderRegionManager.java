@@ -1,9 +1,5 @@
-package me.jellysquid.mods.sodium.client.render.chunk.region;
-
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
-import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
-import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.gl.arena.PendingUpload;
 import me.jellysquid.mods.sodium.client.gl.arena.staging.FallbackStagingBuffer;
 import me.jellysquid.mods.sodium.client.gl.arena.staging.MappedStagingBuffer;
@@ -21,7 +17,6 @@ import java.util.*;
 
 public class RenderRegionManager {
     private final Long2ReferenceOpenHashMap<RenderRegion> regions = new Long2ReferenceOpenHashMap<>();
-
     private final StagingBuffer stagingBuffer;
 
     public RenderRegionManager(CommandList commandList) {
@@ -32,8 +27,7 @@ public class RenderRegionManager {
         this.stagingBuffer.flip();
 
         try (CommandList commandList = RenderDevice.INSTANCE.createCommandList()) {
-            Iterator<RenderRegion> it = this.regions.values()
-                    .iterator();
+            Iterator<RenderRegion> it = this.regions.values().iterator();
 
             while (it.hasNext()) {
                 RenderRegion region = it.next();
@@ -41,7 +35,6 @@ public class RenderRegionManager {
 
                 if (region.isEmpty()) {
                     region.delete(commandList);
-
                     it.remove();
                 }
             }
@@ -49,16 +42,16 @@ public class RenderRegionManager {
     }
 
     public void uploadMeshes(CommandList commandList, Collection<ChunkBuildOutput> results) {
-        for (var entry : this.createMeshUploadQueues(results)) {
-            this.uploadMeshes(commandList, entry.getKey(), entry.getValue());
-        }
+        results.parallelStream()
+               .collect(groupingByConcurrent(ChunkBuildOutput::getRender, mapping(identity(), toList())))
+               .forEach((region, builds) -> uploadMeshes(commandList, region, builds));
     }
 
-    private void uploadMeshes(CommandList commandList, RenderRegion region, Collection<ChunkBuildOutput> results) {
-        var uploads = new ArrayList<PendingSectionUpload>();
+    private void uploadMeshes(CommandList commandList, RenderRegion region, List<ChunkBuildOutput> results) {
+        List<PendingSectionUpload> uploads = new ArrayList<>();
 
-        for (ChunkBuildOutput result : results) {
-            for (TerrainRenderPass pass : DefaultTerrainRenderPasses.ALL) {
+        results.forEach(result -> {
+            DefaultTerrainRenderPasses.ALL.forEach(pass -> {
                 var storage = region.getStorage(pass);
 
                 if (storage != null) {
@@ -71,10 +64,9 @@ public class RenderRegionManager {
                     uploads.add(new PendingSectionUpload(result.render, mesh, pass,
                             new PendingUpload(mesh.getVertexData())));
                 }
-            }
-        }
+            });
+        });
 
-        // If we have nothing to upload, abort!
         if (uploads.isEmpty()) {
             return;
         }
@@ -85,46 +77,25 @@ public class RenderRegionManager {
         boolean bufferChanged = arena.upload(commandList, uploads.stream()
                 .map(upload -> upload.vertexUpload));
 
-        // If any of the buffers changed, the tessellation will need to be updated
-        // Once invalidated the tessellation will be re-created on the next attempted use
         if (bufferChanged) {
             region.refresh(commandList);
         }
 
-        // Collect the upload results
-        for (PendingSectionUpload upload : uploads) {
+        uploads.forEach(upload -> {
             var storage = region.createStorage(upload.pass);
             storage.setMeshes(upload.section.getSectionIndex(),
                     upload.vertexUpload.getResult(), upload.meshData.getVertexRanges());
-        }
-    }
-
-    private Reference2ReferenceMap.FastEntrySet<RenderRegion, List<ChunkBuildOutput>> createMeshUploadQueues(Collection<ChunkBuildOutput> results) {
-        var map = new Reference2ReferenceOpenHashMap<RenderRegion, List<ChunkBuildOutput>>();
-
-        for (var result : results) {
-            var queue = map.computeIfAbsent(result.render.getRegion(), k -> new ArrayList<>());
-            queue.add(result);
-        }
-
-        return map.reference2ReferenceEntrySet();
+        });
     }
 
     public void delete(CommandList commandList) {
-        for (RenderRegion region : this.regions.values()) {
-            region.delete(commandList);
-        }
-
+        this.regions.values().forEach(region -> region.delete(commandList));
         this.regions.clear();
         this.stagingBuffer.delete(commandList);
     }
 
     public Collection<RenderRegion> getLoadedRegions() {
         return this.regions.values();
-    }
-
-    public StagingBuffer getStagingBuffer() {
-        return this.stagingBuffer;
     }
 
     public RenderRegion createForChunk(int chunkX, int chunkY, int chunkZ) {
@@ -135,19 +106,16 @@ public class RenderRegionManager {
 
     @NotNull
     private RenderRegion create(int x, int y, int z) {
-        var key = RenderRegion.key(x, y, z);
-        var instance = this.regions.get(key);
+        long key = RenderRegion.key(x, y, z);
+        RenderRegion instance = this.regions.get(key);
 
         if (instance == null) {
-            this.regions.put(key, instance = new RenderRegion(x, y, z, this.stagingBuffer));
+            instance = new RenderRegion(x, y, z, this.stagingBuffer);
+            this.regions.put(key, instance);
         }
 
         return instance;
     }
-
-    private record PendingSectionUpload(RenderSection section, BuiltSectionMeshParts meshData, TerrainRenderPass pass, PendingUpload vertexUpload) {
-    }
-
 
     private static StagingBuffer createStagingBuffer(CommandList commandList) {
         if (SodiumClientMod.options().advanced.useAdvancedStagingBuffers && MappedStagingBuffer.isSupported(RenderDevice.INSTANCE)) {
@@ -155,5 +123,8 @@ public class RenderRegionManager {
         }
 
         return new FallbackStagingBuffer(commandList);
+    }
+
+    private record PendingSectionUpload(RenderSection section, BuiltSectionMeshParts meshData, TerrainRenderPass pass, PendingUpload vertexUpload) {
     }
 }
