@@ -32,6 +32,7 @@
     "core.world.map.ClientChunkManagerMixin",
     "core.world.map.ClientPlayNetworkHandlerMixin",
     "core.world.map.ClientWorldMixin",
+    "features.optimized_bamboo.MixinBambooBlock",
     "features.gui.hooks.console.GameRendererMixin",
     "features.gui.hooks.debug.DebugHudMixin",
     "features.gui.hooks.settings.OptionsScreenMixin",
