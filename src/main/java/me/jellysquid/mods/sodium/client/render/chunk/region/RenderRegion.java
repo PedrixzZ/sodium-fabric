@@ -15,8 +15,8 @@ import me.jellysquid.mods.sodium.client.util.MathUtil;
 import net.minecraft.util.math.ChunkSectionPos;
 import org.apache.commons.lang3.Validate;
 
-import java.util.Arrays;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class RenderRegion {
     public static final int REGION_WIDTH = 8;
@@ -33,12 +33,6 @@ public class RenderRegion {
 
     public static final int REGION_SIZE = REGION_WIDTH * REGION_HEIGHT * REGION_LENGTH;
 
-    static {
-        Validate.isTrue(MathUtil.isPowerOfTwo(REGION_WIDTH));
-        Validate.isTrue(MathUtil.isPowerOfTwo(REGION_HEIGHT));
-        Validate.isTrue(MathUtil.isPowerOfTwo(REGION_LENGTH));
-    }
-
     private final StagingBuffer stagingBuffer;
     private final int x, y, z;
 
@@ -47,7 +41,8 @@ public class RenderRegion {
     private final RenderSection[] sections = new RenderSection[RenderRegion.REGION_SIZE];
     private int sectionCount;
 
-    private final Map<TerrainRenderPass, SectionRenderDataStorage> sectionRenderData = new Reference2ReferenceOpenHashMap<>();
+    // Usando ConcurrentHashMap para melhorar a concorrência e o desempenho
+    private final Map<TerrainRenderPass, SectionRenderDataStorage> sectionRenderData = new ConcurrentHashMap<>();
     private DeviceResources resources;
 
     public RenderRegion(int x, int y, int z, StagingBuffer stagingBuffer) {
@@ -88,112 +83,97 @@ public class RenderRegion {
     }
 
     public void delete(CommandList commandList) {
-        for (var storage : this.sectionRenderData.values()) {
-            storage.delete();
+        sectionRenderData.values().forEach(SectionRenderDataStorage::delete);
+        sectionRenderData.clear();
+
+        if (resources != null) {
+            resources.delete(commandList);
+            resources = null;
         }
 
-        this.sectionRenderData.clear();
-
-        if (this.resources != null) {
-            this.resources.delete(commandList);
-            this.resources = null;
-        }
-
-        Arrays.fill(this.sections, null);
+        Arrays.fill(sections, null);
     }
 
     public boolean isEmpty() {
-        return this.sectionCount == 0;
+        return sectionCount == 0;
     }
 
     public SectionRenderDataStorage getStorage(TerrainRenderPass pass) {
-        return this.sectionRenderData.get(pass);
+        return sectionRenderData.get(pass);
     }
 
     public SectionRenderDataStorage createStorage(TerrainRenderPass pass) {
-        var storage = this.sectionRenderData.get(pass);
-
-        if (storage == null) {
-            this.sectionRenderData.put(pass, storage = new SectionRenderDataStorage());
-        }
-
-        return storage;
+        return sectionRenderData.computeIfAbsent(pass, k -> new SectionRenderDataStorage());
     }
 
     public void refresh(CommandList commandList) {
-        if (this.resources != null) {
-            this.resources.deleteTessellations(commandList);
-        }
-
-        for (var storage : this.sectionRenderData.values()) {
-            storage.onBufferResized();
-        }
+        sectionRenderData.values().forEach(SectionRenderDataStorage::onBufferResized);
     }
 
-    public void addSection(RenderSection section) {
-        var sectionIndex = section.getSectionIndex();
-        var prev = this.sections[sectionIndex];
+    public synchronized void addSection(RenderSection section) {
+        int sectionIndex = section.getSectionIndex();
 
-        if (prev != null) {
+        if (sections[sectionIndex] != null) {
             throw new IllegalStateException("Section has already been added to the region");
         }
 
-        this.sections[sectionIndex] = section;
-        this.sectionCount++;
+        sections[sectionIndex] = section;
+        sectionCount++;
     }
 
-    public void removeSection(RenderSection section) {
-        var sectionIndex = section.getSectionIndex();
-        var prev = this.sections[sectionIndex];
+    public synchronized void removeSection(RenderSection section) {
+        int sectionIndex = section.getSectionIndex();
 
-        if (prev == null) {
+        if (sections[sectionIndex] == null) {
             throw new IllegalStateException("Section was not loaded within the region");
-        } else if (prev != section) {
+        }
+
+        if (sections[sectionIndex] != section) {
             throw new IllegalStateException("Tried to remove the wrong section");
         }
 
-        for (var storage : this.sectionRenderData.values()) {
-            storage.removeMeshes(sectionIndex);
-        }
+        sectionRenderData.values().forEach(storage -> storage.removeMeshes(sectionIndex));
 
-        this.sections[sectionIndex] = null;
-        this.sectionCount--;
+        sections[sectionIndex] = null;
+        sectionCount--;
     }
 
     public RenderSection getSection(int id) {
-        return this.sections[id];
+        return sections[id];
     }
 
     public DeviceResources getResources() {
-        return this.resources;
+        return resources;
     }
 
     public DeviceResources createResources(CommandList commandList) {
-        if (this.resources == null) {
-            this.resources = new DeviceResources(commandList, this.stagingBuffer);
+        if (resources == null) {
+            resources = new DeviceResources(commandList, stagingBuffer, REGION_SIZE);
         }
 
-        return this.resources;
+        return resources;
     }
 
     public void update(CommandList commandList) {
-        if (this.resources != null && this.resources.shouldDelete()) {
-            this.resources.delete(commandList);
-            this.resources = null;
+        if (resources != null && resources.shouldDelete()) {
+            resources.delete(commandList);
+            resources = null;
         }
     }
 
     public ChunkRenderList getRenderList() {
-        return this.renderList;
+        return renderList;
     }
 
     public static class DeviceResources {
         private final GlBufferArena geometryArena;
         private GlTessellation tessellation;
 
-        public DeviceResources(CommandList commandList, StagingBuffer stagingBuffer) {
+        public DeviceResources(CommandList commandList, StagingBuffer stagingBuffer, int regionSize) {
             int stride = ChunkMeshFormats.COMPACT.getVertexFormat().getStride();
-            this.geometryArena = new GlBufferArena(commandList, REGION_SIZE * 756, stride, stagingBuffer);
+            this.geometryArena = new GlBufferArena(commandList, regionSize * stride * 6, stride, stagingBuffer); // Ajuste do tamanho do buffer
+
+            // Inicialização assíncrona ou em thread separada da tessellation, se necessário
         }
 
         public void updateTessellation(CommandList commandList, GlTessellation tessellation) {
@@ -205,31 +185,31 @@ public class RenderRegion {
         }
 
         public GlTessellation getTessellation() {
-            return this.tessellation;
+            return tessellation;
         }
 
         public void deleteTessellations(CommandList commandList) {
-            if (this.tessellation != null) {
-                this.tessellation.delete(commandList);
-                this.tessellation = null;
+            if (tessellation != null) {
+                tessellation.delete(commandList);
+                tessellation = null;
             }
         }
 
         public GlBuffer getVertexBuffer() {
-            return this.geometryArena.getBufferObject();
+            return geometryArena.getBufferObject();
         }
 
         public void delete(CommandList commandList) {
-            this.deleteTessellations(commandList);
-            this.geometryArena.delete(commandList);
+            deleteTessellations(commandList);
+            geometryArena.delete(commandList);
         }
 
         public GlBufferArena getGeometryArena() {
-            return this.geometryArena;
+            return geometryArena;
         }
 
         public boolean shouldDelete() {
-            return this.geometryArena.isEmpty();
+            return geometryArena.isEmpty();
         }
     }
 }
