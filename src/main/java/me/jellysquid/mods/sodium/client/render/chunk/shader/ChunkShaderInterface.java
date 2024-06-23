@@ -1,56 +1,48 @@
 package me.jellysquid.mods.sodium.client.render.chunk.shader;
 
-import com.mojang.blaze3d.platform.GlStateManager;
+import com.mojang.blaze3d.systems.RenderSystem;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat3v;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformInt;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformMatrix4f;
 import me.jellysquid.mods.sodium.client.util.TextureUtil;
 import org.joml.Matrix4fc;
-import org.lwjgl.opengl.GL32C;
 
-import java.util.EnumMap;
-import java.util.Map;
+import java.util.function.Function;
 
 /**
  * A forward-rendering shader program for chunks.
  */
 public class ChunkShaderInterface {
-    private final Map<ChunkShaderTextureSlot, GlUniformInt> uniformTextures;
-
     private final GlUniformMatrix4f uniformModelViewMatrix;
     private final GlUniformMatrix4f uniformProjectionMatrix;
     private final GlUniformFloat3v uniformRegionOffset;
+    private final GlUniformInt uniformBlockTex;
+    private final GlUniformInt uniformLightTex;
+    private final Function<ShaderBindingContext, ChunkShaderFogComponent> fogComponentFactory;
 
-    // The fog shader component used by this program in order to setup the appropriate GL state
-    private final ChunkShaderFogComponent fogShader;
+    private ChunkShaderFogComponent fogComponent;
 
     public ChunkShaderInterface(ShaderBindingContext context, ChunkShaderOptions options) {
-        this.uniformModelViewMatrix = context.bindUniform("u_ModelViewMatrix", GlUniformMatrix4f::new);
-        this.uniformProjectionMatrix = context.bindUniform("u_ProjectionMatrix", GlUniformMatrix4f::new);
-        this.uniformRegionOffset = context.bindUniform("u_RegionOffset", GlUniformFloat3v::new);
+        this.uniformModelViewMatrix = new GlUniformMatrix4f(context, "u_ModelViewMatrix");
+        this.uniformProjectionMatrix = new GlUniformMatrix4f(context, "u_ProjectionMatrix");
+        this.uniformRegionOffset = new GlUniformFloat3v(context, "u_RegionOffset");
+        this.uniformBlockTex = new GlUniformInt(context, "u_BlockTex");
+        this.uniformLightTex = new GlUniformInt(context, "u_LightTex");
 
-        this.uniformTextures = new EnumMap<>(ChunkShaderTextureSlot.class);
-        this.uniformTextures.put(ChunkShaderTextureSlot.BLOCK, context.bindUniform("u_BlockTex", GlUniformInt::new));
-        this.uniformTextures.put(ChunkShaderTextureSlot.LIGHT, context.bindUniform("u_LightTex", GlUniformInt::new));
-
-        this.fogShader = options.fog().getFactory().apply(context);
+        this.fogComponentFactory = options.fog().getFactory();
+        this.fogComponent = this.fogComponentFactory.apply(context);
     }
 
-    @Deprecated // the shader interface should not modify pipeline state
     public void setupState() {
-        this.bindTexture(ChunkShaderTextureSlot.BLOCK, TextureUtil.getBlockTextureId());
-        this.bindTexture(ChunkShaderTextureSlot.LIGHT, TextureUtil.getLightTextureId());
+        RenderSystem.activeTexture(RenderSystem.GL_TEXTURE0);
+        RenderSystem.bindTexture(TextureUtil.getBlockTextureId());
+        this.uniformBlockTex.set(0);
 
-        this.fogShader.setup();
-    }
+        RenderSystem.activeTexture(RenderSystem.GL_TEXTURE1);
+        RenderSystem.bindTexture(TextureUtil.getLightTextureId());
+        this.uniformLightTex.set(1);
 
-    @Deprecated(forRemoval = true) // should be handled properly in GFX instead.
-    private void bindTexture(ChunkShaderTextureSlot slot, int textureId) {
-        GlStateManager._activeTexture(GL32C.GL_TEXTURE0 + slot.ordinal());
-        GlStateManager._bindTexture(textureId);
-
-        var uniform = this.uniformTextures.get(slot);
-        uniform.setInt(slot.ordinal());
+        this.fogComponent.setup();
     }
 
     public void setProjectionMatrix(Matrix4fc matrix) {
