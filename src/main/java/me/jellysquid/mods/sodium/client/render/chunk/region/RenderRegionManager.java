@@ -1,6 +1,7 @@
 package me.jellysquid.mods.sodium.client.render.chunk.region;
 
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import me.jellysquid.mods.sodium.client.gl.arena.PendingUpload;
 import me.jellysquid.mods.sodium.client.gl.arena.staging.FallbackStagingBuffer;
