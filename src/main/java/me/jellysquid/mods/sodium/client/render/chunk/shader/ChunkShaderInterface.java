@@ -6,12 +6,11 @@ import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformInt;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformMatrix4f;
 import me.jellysquid.mods.sodium.client.util.TextureUtil;
 import org.joml.Matrix4fc;
+import org.lwjgl.opengl.GL13; // Importe a classe GL13 para acessar GL_TEXTURE0 e GL_TEXTURE1
+
 
 import java.util.function.Function;
 
-/**
- * A forward-rendering shader program for chunks.
- */
 public class ChunkShaderInterface {
     private final GlUniformMatrix4f uniformModelViewMatrix;
     private final GlUniformMatrix4f uniformProjectionMatrix;
@@ -23,22 +22,24 @@ public class ChunkShaderInterface {
     private ChunkShaderFogComponent fogComponent;
 
     public ChunkShaderInterface(ShaderBindingContext context, ChunkShaderOptions options) {
-        this.uniformModelViewMatrix = new GlUniformMatrix4f(context, "u_ModelViewMatrix");
-        this.uniformProjectionMatrix = new GlUniformMatrix4f(context, "u_ProjectionMatrix");
-        this.uniformRegionOffset = new GlUniformFloat3v(context, "u_RegionOffset");
-        this.uniformBlockTex = new GlUniformInt(context, "u_BlockTex");
-        this.uniformLightTex = new GlUniformInt(context, "u_LightTex");
+        int shaderProgramId = /* Adicione aqui o ID do programa de shader */;
+        
+        this.uniformModelViewMatrix = new GlUniformMatrix4f(shaderProgramId, "u_ModelViewMatrix");
+        this.uniformProjectionMatrix = new GlUniformMatrix4f(shaderProgramId, "u_ProjectionMatrix");
+        this.uniformRegionOffset = new GlUniformFloat3v(shaderProgramId, "u_RegionOffset");
+        this.uniformBlockTex = new GlUniformInt(shaderProgramId, "u_BlockTex");
+        this.uniformLightTex = new GlUniformInt(shaderProgramId, "u_LightTex");
 
         this.fogComponentFactory = options.fog().getFactory();
         this.fogComponent = this.fogComponentFactory.apply(context);
     }
 
     public void setupState() {
-        RenderSystem.activeTexture(RenderSystem.GL_TEXTURE0);
+        GL13.glActiveTexture(GL13.GL_TEXTURE0);
         RenderSystem.bindTexture(TextureUtil.getBlockTextureId());
         this.uniformBlockTex.set(0);
 
-        RenderSystem.activeTexture(RenderSystem.GL_TEXTURE1);
+        GL13.glActiveTexture(GL13.GL_TEXTURE1);
         RenderSystem.bindTexture(TextureUtil.getLightTextureId());
         this.uniformLightTex.set(1);
 
